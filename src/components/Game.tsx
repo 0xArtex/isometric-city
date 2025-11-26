@@ -113,7 +113,7 @@ function Sidebar() {
   const { selectedTool, stats, activePanel } = state;
   
   const toolCategories = {
-    'TOOLS': ['select', 'bulldoze', 'road', 'tree'] as Tool[],
+    'TOOLS': ['select', 'bulldoze', 'road'] as Tool[],
     'ZONES': ['zone_residential', 'zone_commercial', 'zone_industrial', 'zone_dezone'] as Tool[],
     'SERVICES': ['police_station', 'fire_station', 'hospital', 'school', 'university', 'park'] as Tool[],
     'UTILITIES': ['power_plant', 'water_tower'] as Tool[],
@@ -136,7 +136,7 @@ function Sidebar() {
             <div className="px-4 py-2 text-[10px] font-bold tracking-widest text-muted-foreground">
               {category}
             </div>
-            <div className="px-2">
+            <div className="px-2 flex flex-col gap-0.5">
               {tools.map(tool => {
                 const info = TOOL_INFO[tool];
                 const isSelected = selectedTool === tool;
@@ -145,7 +145,7 @@ function Sidebar() {
                 return (
                   <TooltipProvider key={tool}>
                     <Tooltip>
-                      <TooltipTrigger>
+                      <TooltipTrigger asChild>
                         <Button
                           onClick={() => setTool(tool)}
                           disabled={!canAfford && info.cost > 0}
@@ -1339,7 +1339,21 @@ function IsometricGrid({ overlayMode }: { overlayMode: OverlayMode }) {
   const coverageRadius = selectedTool === 'power_plant' ? 12 : selectedTool === 'water_tower' ? 10 : 0;
   const coverageMode: OverlayMode = selectedTool === 'power_plant' ? 'power' : selectedTool === 'water_tower' ? 'water' : 'none';
   
-  const supportsDrag = ['road', 'bulldoze', 'zone_residential', 'zone_commercial', 'zone_industrial', 'zone_dezone', 'tree'].includes(selectedTool);
+  const supportsDrag = ['road', 'bulldoze', 'zone_residential', 'zone_commercial', 'zone_industrial', 'zone_dezone'].includes(selectedTool);
+  
+  // Handle ESC key to deselect tile
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && selectedTile) {
+        setSelectedTile(null);
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [selectedTile]);
   
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (e.button === 1 || (e.button === 0 && e.altKey)) {
@@ -1552,25 +1566,8 @@ function IsometricGrid({ overlayMode }: { overlayMode: OverlayMode }) {
                 tile.building.type !== 'road' &&
                 tile.building.type !== 'tree';
               
-                              // Calculate road adjacency for road tiles
-                              let roadAdjacency: RoadAdjacency | undefined;
-                              if (buildingType === 'road') {
-                                // Check adjacent tiles for roads
-                                // Grid coords: x increases right, y increases down
-                                // In isometric view: x-1 = north (top-left edge), y-1 = east (top-right edge)
-                                //                   x+1 = south (bottom-right edge), y+1 = west (bottom-left edge)
-                                const hasNorth = x > 0 && grid[y][x - 1]?.building.type === 'road';
-                                const hasEast = y > 0 && grid[y - 1][x]?.building.type === 'road';
-                                const hasSouth = x < gridSize - 1 && grid[y][x + 1]?.building.type === 'road';
-                                const hasWest = y < gridSize - 1 && grid[y + 1][x]?.building.type === 'road';
-                                
-                                roadAdjacency = {
-                                  north: hasNorth,
-                                  east: hasEast,
-                                  south: hasSouth,
-                                  west: hasWest,
-                                };
-                              }
+              // Road adjacency is not needed here since roads are rendered in base layer
+              const roadAdjacency: RoadAdjacency | undefined = undefined;
               
               return (
                 <div
