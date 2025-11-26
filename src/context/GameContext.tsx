@@ -266,7 +266,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     let timer: ReturnType<typeof setInterval> | null = null;
 
     if (state.speed > 0) {
-      const interval = state.speed === 1 ? 500 : state.speed === 2 ? 220 : 120;
+      const interval = state.speed === 1 ? 500 : state.speed === 2 ? 220 : 50;
       timer = setInterval(() => {
         setState((prev) => simulateTick(prev));
       }, interval);

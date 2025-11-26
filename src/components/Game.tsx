@@ -3,6 +3,7 @@
 import React, { useRef, useState, useCallback, useEffect, useMemo } from 'react';
 import { useGame } from '@/context/GameContext';
 import { Tool, TOOL_INFO, Tile } from '@/types/game';
+import { getBuildingSize } from '@/lib/simulation';
 import {
   PlayIcon,
   PauseIcon,
@@ -221,26 +222,29 @@ const TopBar = React.memo(function TopBar() {
             >
               {s === 0 ? <PauseIcon size={14} /> : 
                s === 1 ? <PlayIcon size={14} /> : 
-               <FastForwardIcon size={14} />}
+               s === 2 ? <FastForwardIcon size={14} /> :
+               <div className="flex items-center gap-0.5">
+                 <PlayIcon size={10} />
+                 <PlayIcon size={10} />
+                 <PlayIcon size={10} />
+               </div>}
             </Button>
           ))}
         </div>
       </div>
       
-      <div className="flex items-center gap-6">
-        <StatBadge icon={<PopulationIcon size={14} />} value={stats.population.toLocaleString()} label="Pop" />
-        <StatBadge icon={<JobsIcon size={14} />} value={stats.jobs.toLocaleString()} label="Jobs" />
+      <div className="flex items-center gap-8">
+        <StatBadge value={stats.population.toLocaleString()} label="Population" />
+        <StatBadge value={stats.jobs.toLocaleString()} label="Jobs" />
         <StatBadge 
-          icon={<MoneyIcon size={14} />} 
           value={`$${stats.money.toLocaleString()}`} 
           label="Funds"
           variant={stats.money < 0 ? 'destructive' : stats.money < 1000 ? 'warning' : 'success'}
         />
         <Separator orientation="vertical" className="h-8" />
         <StatBadge 
-          icon={<span className="text-xs">+/-</span>} 
           value={`$${(stats.income - stats.expenses).toLocaleString()}`} 
-          label="/mo"
+          label="Monthly"
           variant={stats.income - stats.expenses >= 0 ? 'success' : 'destructive'}
         />
       </div>
@@ -271,8 +275,7 @@ const TopBar = React.memo(function TopBar() {
   );
 });
 
-function StatBadge({ icon, value, label, variant = 'default' }: { 
-  icon: React.ReactNode; 
+function StatBadge({ value, label, variant = 'default' }: { 
   value: string; 
   label: string; 
   variant?: 'default' | 'success' | 'warning' | 'destructive';
@@ -282,12 +285,9 @@ function StatBadge({ icon, value, label, variant = 'default' }: {
                      variant === 'destructive' ? 'text-red-500' : 'text-foreground';
   
   return (
-    <div className="flex items-center gap-2">
-      <span className="text-muted-foreground">{icon}</span>
-      <div>
-        <div className={`text-xs font-mono ${colorClass}`}>{value}</div>
-        <div className="text-[10px] text-muted-foreground">{label}</div>
-      </div>
+    <div className="flex flex-col items-start">
+      <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium mb-0.5">{label}</div>
+      <div className={`text-sm font-mono font-semibold ${colorClass}`}>{value}</div>
     </div>
   );
 }
@@ -1016,8 +1016,12 @@ function CanvasIsometricGrid({ overlayMode, selectedTile, setSelectedTile }: {
   const [dragEndTile, setDragEndTile] = useState<{ x: number; y: number } | null>(null);
   
   const { grid, gridSize, selectedTool } = state;
+
+  // Only zoning tools show the grid/rectangle selection visualization
+  const showsDragGrid = ['zone_residential', 'zone_commercial', 'zone_industrial', 'zone_dezone'].includes(selectedTool);
   
-  const supportsDrag = ['zone_residential', 'zone_commercial', 'zone_industrial', 'zone_dezone'].includes(selectedTool);
+  // Roads and other tools support drag-to-place but don't show the grid
+  const supportsDragPlace = selectedTool !== 'select' && selectedTool !== 'bulldoze';
   
   // Load all building images on mount
   useEffect(() => {
@@ -1101,8 +1105,8 @@ function CanvasIsometricGrid({ overlayMode, selectedTile, setSelectedTile }: {
         const isHovered = hoveredTile?.x === x && hoveredTile?.y === y;
         const isSelected = selectedTile?.x === x && selectedTile?.y === y;
         
-        // Check if tile is in drag selection rectangle
-        const isInDragRect = dragStartTile && dragEndTile && 
+        // Check if tile is in drag selection rectangle (only show for zoning tools)
+        const isInDragRect = showsDragGrid && dragStartTile && dragEndTile && 
           x >= Math.min(dragStartTile.x, dragEndTile.x) &&
           x <= Math.max(dragStartTile.x, dragEndTile.x) &&
           y >= Math.min(dragStartTile.y, dragEndTile.y) &&
@@ -1368,6 +1372,35 @@ function CanvasIsometricGrid({ overlayMode, selectedTile, setSelectedTile }: {
       return;
     }
     
+    // Get building size to handle multi-tile buildings
+    const buildingSize = getBuildingSize(buildingType);
+    const isMultiTile = buildingSize.width > 1 || buildingSize.height > 1;
+    
+    // Calculate position for multi-tile buildings
+    // For multi-tile buildings, we need to position based on the frontmost tile
+    // so that all tiles appear below the building sprite
+    let drawPosX = x;
+    let drawPosY = y;
+    
+    if (isMultiTile) {
+      // For a building with size (width, height), the frontmost tile in isometric view is:
+      // gridX = tile.x + (width - 1)
+      // gridY = tile.y + (height - 1)
+      // This is the bottom-right tile that gets drawn last
+      const frontmostOffsetX = buildingSize.width - 1;
+      const frontmostOffsetY = buildingSize.height - 1;
+      
+      // Convert grid offset to screen offset using isometric transformation
+      // gridToScreen: screenX = (x - y) * (TILE_WIDTH / 2)
+      //               screenY = (x + y) * (TILE_HEIGHT / 2)
+      const screenOffsetX = (frontmostOffsetX - frontmostOffsetY) * (w / 2);
+      const screenOffsetY = (frontmostOffsetX + frontmostOffsetY) * (h / 2);
+      
+      // Position at the frontmost tile so all tiles appear below
+      drawPosX = x + screenOffsetX;
+      drawPosY = y + screenOffsetY;
+    }
+    
     // Map building types to images
     let imageSrc: string | null = null;
     let sizeMultiplier = 1.8; // Default size for buildings
@@ -1381,7 +1414,7 @@ function CanvasIsometricGrid({ overlayMode, selectedTile, setSelectedTile }: {
     } else if (BUILDING_IMAGES[buildingType]) {
       imageSrc = BUILDING_IMAGES[buildingType];
       // Larger buildings need bigger sprites
-      if (buildingType === 'power_plant') sizeMultiplier = 2.5;
+      if (buildingType === 'power_plant') sizeMultiplier = 2.25; // Scaled down 10% from 2.5
       else if (buildingType === 'stadium') sizeMultiplier = 3.5;
       else if (buildingType === 'university') sizeMultiplier = 2.8;
       else if (buildingType === 'hospital') sizeMultiplier = 1.65; // Scaled down 25% from 2.2
@@ -1395,8 +1428,12 @@ function CanvasIsometricGrid({ overlayMode, selectedTile, setSelectedTile }: {
       const imgSize = w * sizeMultiplier;
       
       // Calculate position to center building on tile
-      const drawX = x + w / 2 - imgSize / 2;
-      const drawY = y - imgSize + h + imgSize * 0.15;
+      // For multi-tile buildings, position relative to frontmost tile so all tiles appear below
+      const drawX = drawPosX + w / 2 - imgSize / 2;
+      // For multi-tile buildings, draw higher (lower Y) so it appears above all tiles
+      // The frontmost tile is drawn last, so we position relative to it
+      const baseY = isMultiTile ? drawPosY : y;
+      const drawY = baseY - imgSize + h + imgSize * 0.15;
       
       // Draw with crisp rendering
       ctx.drawImage(
@@ -1410,8 +1447,8 @@ function CanvasIsometricGrid({ overlayMode, selectedTile, setSelectedTile }: {
     
     // Draw fire effect
     if (tile.building.onFire) {
-      const fireX = x + w / 2;
-      const fireY = y - 10;
+      const fireX = drawPosX + w / 2;
+      const fireY = drawPosY - 10;
       
       // Outer glow
       ctx.fillStyle = 'rgba(255, 100, 0, 0.5)';
@@ -1451,19 +1488,26 @@ function CanvasIsometricGrid({ overlayMode, selectedTile, setSelectedTile }: {
         if (gridX >= 0 && gridX < gridSize && gridY >= 0 && gridY < gridSize) {
           if (selectedTool === 'select') {
             setSelectedTile({ x: gridX, y: gridY });
-          } else if (supportsDrag) {
-            // Start drag rectangle selection
+          } else if (showsDragGrid) {
+            // Start drag rectangle selection for zoning tools
             setDragStartTile({ x: gridX, y: gridY });
             setDragEndTile({ x: gridX, y: gridY });
             setIsDragging(true);
+          } else if (supportsDragPlace) {
+            // For roads and other tools, start drag-to-place
+            setDragStartTile({ x: gridX, y: gridY });
+            setDragEndTile({ x: gridX, y: gridY });
+            setIsDragging(true);
+            // Place immediately on first click
+            placeAtTile(gridX, gridY);
           } else {
-            // Single placement for non-drag tools
+            // Single placement for bulldoze
             placeAtTile(gridX, gridY);
           }
         }
       }
     }
-  }, [offset, gridSize, selectedTool, placeAtTile, zoom, supportsDrag, setSelectedTile]);
+  }, [offset, gridSize, selectedTool, placeAtTile, zoom, showsDragGrid, supportsDragPlace, setSelectedTile]);
   
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if (isPanning) {
@@ -1483,19 +1527,28 @@ function CanvasIsometricGrid({ overlayMode, selectedTile, setSelectedTile }: {
       if (gridX >= 0 && gridX < gridSize && gridY >= 0 && gridY < gridSize) {
         setHoveredTile({ x: gridX, y: gridY });
         
-        // Update drag rectangle end point
-        if (isDragging && supportsDrag && dragStartTile) {
+        // Update drag rectangle end point for zoning tools
+        if (isDragging && showsDragGrid && dragStartTile) {
           setDragEndTile({ x: gridX, y: gridY });
+        }
+        // For roads and other tools, place as you drag
+        else if (isDragging && supportsDragPlace && dragStartTile) {
+          setDragEndTile({ x: gridX, y: gridY });
+          // Place at current tile if it's different from last placed
+          if (!lastPlacedTile || lastPlacedTile.x !== gridX || lastPlacedTile.y !== gridY) {
+            placeAtTile(gridX, gridY);
+            setLastPlacedTile({ x: gridX, y: gridY });
+          }
         }
       } else {
         setHoveredTile(null);
       }
     }
-  }, [isPanning, isDragging, dragStart, offset, gridSize, zoom, supportsDrag, dragStartTile]);
+  }, [isPanning, isDragging, dragStart, offset, gridSize, zoom, showsDragGrid, supportsDragPlace, dragStartTile, lastPlacedTile, placeAtTile]);
   
   const handleMouseUp = useCallback(() => {
-    // Fill the drag rectangle when mouse is released
-    if (isDragging && dragStartTile && dragEndTile && supportsDrag) {
+    // Fill the drag rectangle when mouse is released (only for zoning tools)
+    if (isDragging && dragStartTile && dragEndTile && showsDragGrid) {
       const minX = Math.min(dragStartTile.x, dragEndTile.x);
       const maxX = Math.max(dragStartTile.x, dragEndTile.x);
       const minY = Math.min(dragStartTile.y, dragEndTile.y);
@@ -1508,13 +1561,14 @@ function CanvasIsometricGrid({ overlayMode, selectedTile, setSelectedTile }: {
         }
       }
     }
+    // For roads and other tools, placement already happened during drag
     
     setIsPanning(false);
     setIsDragging(false);
     setLastPlacedTile(null);
     setDragStartTile(null);
     setDragEndTile(null);
-  }, [isDragging, dragStartTile, dragEndTile, supportsDrag, placeAtTile]);
+  }, [isDragging, dragStartTile, dragEndTile, showsDragGrid, placeAtTile]);
   
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
@@ -1552,7 +1606,7 @@ function CanvasIsometricGrid({ overlayMode, selectedTile, setSelectedTile }: {
       
       {hoveredTile && selectedTool !== 'select' && (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-card/90 border border-border px-4 py-2 rounded-md text-sm">
-          {isDragging && dragStartTile && dragEndTile ? (
+          {isDragging && dragStartTile && dragEndTile && showsDragGrid ? (
             <>
               {TOOL_INFO[selectedTool].name} - {Math.abs(dragEndTile.x - dragStartTile.x) + 1}x{Math.abs(dragEndTile.y - dragStartTile.y) + 1} area
               {TOOL_INFO[selectedTool].cost > 0 && ` - $${TOOL_INFO[selectedTool].cost * (Math.abs(dragEndTile.x - dragStartTile.x) + 1) * (Math.abs(dragEndTile.y - dragStartTile.y) + 1)}`}
@@ -1561,7 +1615,8 @@ function CanvasIsometricGrid({ overlayMode, selectedTile, setSelectedTile }: {
             <>
               {TOOL_INFO[selectedTool].name} at ({hoveredTile.x}, {hoveredTile.y})
               {TOOL_INFO[selectedTool].cost > 0 && ` - $${TOOL_INFO[selectedTool].cost}`}
-              {supportsDrag && ' - Drag to zone area'}
+              {showsDragGrid && ' - Drag to zone area'}
+              {supportsDragPlace && !showsDragGrid && ' - Drag to place'}
             </>
           )}
         </div>
